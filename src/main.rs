@@ -182,8 +182,12 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_save_access_token() {
+        dotenv().ok();
+        env_logger::init();
+
         let pocket_sdk = PocketSdk::new("consumer_key".to_string(), "redirect_uri".to_string());
-        let redis_client = Client::open("redis_url").expect("Failed to connect to Redis");
+        let redis_url = env::var("REDIS_URL").expect("REDIS_URL not set");
+        let redis_client = Client::open(redis_url).expect("Failed to connect to Redis");
         let mut app = test::init_service(
             App::new()
                 .app_data(Data::new(pocket_sdk))
