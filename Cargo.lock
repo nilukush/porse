@@ -1066,9 +1066,9 @@ dependencies = [
 
 [[package]]
 name = "porus"
-version = "0.1.13"
+version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73ee64420a91fa4b0e34c4b18c0d3280b88c3ba50f4b08d498273848aecfdcc3"
+checksum = "37722d49f25713651f175f8a9d677261033fdfa9edb7d46f8b3f4d1b14060cf3"
 dependencies = [
  "reqwest",
  "serde",

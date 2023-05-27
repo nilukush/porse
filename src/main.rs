@@ -1,4 +1,4 @@
-use actix_web::web::Data;
+use actix_web::web::{Data, Json};
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use dotenv::dotenv;
 use env_logger;
@@ -6,11 +6,14 @@ use redis::AsyncCommands;
 use redis::Client;
 use redis::{ErrorKind, RedisError};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::env;
 use std::error::Error;
 use std::fmt;
 
 use porus::PocketSdk; // Replace `pocket_sdk` with the actual name of your SDK crate
+
+// API handler for authenticating a user and obtaining a request token
 
 // API handler for authenticating a user and obtaining a request token
 async fn authenticate_user(pocket_sdk: web::Data<PocketSdk>) -> impl Responder {
@@ -23,10 +26,14 @@ async fn authenticate_user(pocket_sdk: web::Data<PocketSdk>) -> impl Responder {
         }
     };
 
-    HttpResponse::Ok().body(format!(
-        "User authenticated. Request token: {}",
-        request_token
-    ))
+    let response_body = json!({
+        "success": true,
+        "request_token": request_token,
+    });
+
+    HttpResponse::Ok()
+        .content_type("application/json")
+        .json(response_body)
 }
 
 // API handler for saving the Pocket access token
@@ -37,9 +44,6 @@ struct AccessTokenRequest {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct RedisPocketAccessTokenResponse {
-    // Define the fields you want to store in Redis
-    // based on PocketAccessTokenResponse structure
-    // Example fields:
     access_token: String,
     username: String,
 }
@@ -62,9 +66,9 @@ impl From<(redis::ErrorKind, &'static str, String)> for CustomRedisError {
 }
 
 async fn save_access_token(
-    form: web::Json<AccessTokenRequest>,
-    pocket_sdk: web::Data<PocketSdk>,
-    redis_client: web::Data<Client>,
+    form: Json<AccessTokenRequest>,
+    pocket_sdk: Data<PocketSdk>,
+    redis_client: Data<Client>,
 ) -> impl Responder {
     let request_token = &form.request_token;
 
@@ -95,12 +99,23 @@ async fn save_access_token(
 
         if let Err(error) = redis_result {
             println!("Failed to store access token in Redis: {}", error);
+            return HttpResponse::InternalServerError().json(json!({
+                "success": false,
+                "error": "Failed to store access token in Redis",
+            }));
         }
     } else {
         println!("Access Token Conversion Failed: {:?}", access_token_result);
+        return HttpResponse::InternalServerError().json(json!({
+            "success": false,
+            "error": "Access Token Conversion Failed",
+        }));
     }
 
-    HttpResponse::Ok().body("Pocket access token saved successfully.")
+    HttpResponse::Ok().json(json!({
+        "success": true,
+        "message": "Pocket access token saved successfully.",
+    }))
 }
 
 #[actix_web::main]
@@ -137,7 +152,6 @@ mod tests {
     use super::*;
     use actix_web::http::StatusCode;
     use actix_web::test;
-    use actix_web::web::Bytes;
     use serde_json::json;
 
     #[actix_rt::test]
@@ -158,10 +172,12 @@ mod tests {
 
         assert_eq!(resp.status(), StatusCode::OK);
         let body = test::read_body(resp).await;
-        assert_eq!(
-            body,
-            Bytes::from_static(b"User authenticated. Request token: ")
-        );
+        println!("Response body: {:?}", body);
+        let json_body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        println!("JSON body: {:?}", json_body);
+        assert_eq!(json_body["success"], true);
+        let request_token = json_body["request_token"]["code"].as_str().unwrap();
+        println!("Request token: {}", request_token);
     }
 
     #[actix_rt::test]
@@ -184,9 +200,11 @@ mod tests {
 
         assert_eq!(resp.status(), StatusCode::OK);
         let body = test::read_body(resp).await;
+        let json_body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json_body["success"], true);
         assert_eq!(
-            body,
-            Bytes::from_static(b"Pocket access token saved successfully.")
+            json_body["message"],
+            "Pocket access token saved successfully."
         );
     }
 }
