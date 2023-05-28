@@ -11,14 +11,22 @@ use std::env;
 use std::error::Error;
 use std::fmt;
 
-use porus::PocketSdk; // Replace `pocket_sdk` with the actual name of your SDK crate
+use porus::PocketSdk;
 
 // API handler for authenticating a user and obtaining a request token
+#[derive(Deserialize)]
+struct AuthenticateUserRequest {
+    redirect_uri: String,
+}
 
-// API handler for authenticating a user and obtaining a request token
-async fn authenticate_user(pocket_sdk: web::Data<PocketSdk>) -> impl Responder {
+async fn authenticate_user(
+    pocket_sdk: web::Data<PocketSdk>,
+    form: web::Json<AuthenticateUserRequest>,
+) -> impl Responder {
+    let redirect_uri = &form.redirect_uri;
+
     // Perform authentication logic using the Pocket SDK
-    let request_token = match pocket_sdk.obtain_request_token().await {
+    let request_token = match pocket_sdk.obtain_request_token(redirect_uri).await {
         Ok(token) => token,
         Err(err) => {
             eprintln!("Error obtaining request token: {}", err);
@@ -81,8 +89,8 @@ async fn save_access_token(
 
     if let Ok(access_token_response) = access_token_result {
         let redis_access_token_response = RedisPocketAccessTokenResponse {
-            access_token: access_token_response.access_token,
-            username: access_token_response.username,
+            access_token: access_token_response.access_token.clone(),
+            username: access_token_response.username.clone(),
         };
 
         let redis_result: redis::RedisResult<()> =
@@ -102,20 +110,23 @@ async fn save_access_token(
             return HttpResponse::InternalServerError().json(json!({
                 "success": false,
                 "error": "Failed to store access token in Redis",
+                "access_token_response": access_token_response,
             }));
         }
+
+        HttpResponse::Ok().json(json!({
+            "success": true,
+            "message": "Pocket access token saved successfully.",
+            "access_token_response": access_token_response,
+        }))
     } else {
         println!("Access Token Conversion Failed: {:?}", access_token_result);
-        return HttpResponse::InternalServerError().json(json!({
+        HttpResponse::InternalServerError().json(json!({
             "success": false,
             "error": "Access Token Conversion Failed",
-        }));
+            "access_token_response": access_token_result,
+        }))
     }
-
-    HttpResponse::Ok().json(json!({
-        "success": true,
-        "message": "Pocket access token saved successfully.",
-    }))
 }
 
 #[actix_web::main]
@@ -125,8 +136,7 @@ async fn main() -> std::io::Result<()> {
 
     // Initialize the Pocket SDK and other dependencies
     let consumer_key = "80908-b39061ed0999bb292f0fe716".to_string();
-    let redirect_uri = "pocketapp1234:authorizationFinished".to_string();
-    let pocket_sdk = PocketSdk::new(consumer_key, redirect_uri); // Replace with the initialization logic for your SDK
+    let pocket_sdk = PocketSdk::new(consumer_key); // Replace with the initialization logic for your SDK
 
     // Connect to Redis
     let redis_url = env::var("REDIS_URL").expect("REDIS_URL not set");
@@ -156,18 +166,20 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_authenticate_user() {
-        let pocket_sdk = PocketSdk::new(
-            "80908-b39061ed0999bb292f0fe716".to_string(),
-            "pocketapp1234:authorizationFinished".to_string(),
-        );
+        let pocket_sdk = PocketSdk::new("80908-b39061ed0999bb292f0fe716".to_string());
         let mut app = test::init_service(
             App::new()
-                .app_data(Data::new(pocket_sdk))
+                .app_data(Data::new(pocket_sdk.clone()))
                 .route("/authenticate", web::post().to(authenticate_user)),
         )
         .await;
 
-        let req = test::TestRequest::post().uri("/authenticate").to_request();
+        let req = test::TestRequest::post()
+            .uri("/authenticate")
+            .set_json(&json!({
+                "redirect_uri": "http://example.com"
+            }))
+            .to_request();
         let resp = test::call_service(&mut app, req).await;
 
         assert_eq!(resp.status(), StatusCode::OK);
@@ -185,29 +197,65 @@ mod tests {
         dotenv().ok();
         env_logger::init();
 
-        let pocket_sdk = PocketSdk::new("consumer_key".to_string(), "redirect_uri".to_string());
-        let redis_url = env::var("REDIS_URL").expect("REDIS_URL not set");
-        let redis_client = Client::open(redis_url).expect("Failed to connect to Redis");
+        let pocket_sdk = PocketSdk::new("80908-b39061ed0999bb292f0fe716".to_string());
         let mut app = test::init_service(
             App::new()
-                .app_data(Data::new(pocket_sdk))
-                .app_data(Data::new(redis_client))
+                .app_data(Data::new(pocket_sdk.clone()))
+                .route("/authenticate", web::post().to(authenticate_user))
                 .route("/save-access-token", web::post().to(save_access_token)),
         )
         .await;
 
-        let req = test::TestRequest::post()
-            .uri("/save-access-token")
-            .set_json(&json!({ "request_token": "test_token" }))
+        // Step 1: Authenticate the user and obtain the request token
+        let auth_req = test::TestRequest::post()
+            .uri("/authenticate")
+            .set_json(&json!({
+                "redirect_uri": "http://example.com"
+            }))
             .to_request();
-        let resp = test::call_service(&mut app, req).await;
+        let auth_resp = test::call_service(&mut app, auth_req).await;
 
-        assert_eq!(resp.status(), StatusCode::OK);
-        let body = test::read_body(resp).await;
-        let json_body: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json_body["success"], true);
+        assert_eq!(auth_resp.status(), StatusCode::OK);
+        let auth_body = test::read_body(auth_resp).await;
+        println!("Authentication Response body: {:?}", auth_body);
+        let auth_json_body: serde_json::Value = serde_json::from_slice(&auth_body).unwrap();
+        println!("Authentication JSON body: {:?}", auth_json_body);
+        assert_eq!(auth_json_body["success"], true);
+        let request_token = auth_json_body["request_token"]["code"].as_str().unwrap();
+        println!("Request token: {}", request_token);
+
+        // Step 2: Simulate user authorization on pocket.com
+        // Replace this step with the actual authorization flow, such as redirecting the user to the Pocket website
+        // Build the authorization URL
+        let authorize_url = format!(
+            "https://getpocket.com/auth/authorize?request_token={}&redirect_uri=http://example.com",
+            request_token
+        );
+        println!("Authorization URL: {}", authorize_url);
+
+        // Simulate waiting for user input
+        println!("Please authorize the application using the above URL.");
+        println!("Press Enter to continue after authorization...");
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input).unwrap();
+
+        // Step 3: Save the access token using the obtained request token
+        let save_token_req = test::TestRequest::post()
+            .uri("/save-access-token")
+            .set_json(&json!({ "request_token": request_token }))
+            .to_request();
+        let save_token_resp = test::call_service(&mut app, save_token_req).await;
+
+        let save_token_status = save_token_resp.status();
+        let save_token_body = test::read_body(save_token_resp).await;
+        println!("Save Token Response body: {:?}", save_token_body);
+        let save_token_json_body: serde_json::Value =
+            serde_json::from_slice(&save_token_body).unwrap();
+
+        assert_eq!(save_token_status, StatusCode::OK);
+        assert_eq!(save_token_json_body["success"], true);
         assert_eq!(
-            json_body["message"],
+            save_token_json_body["message"],
             "Pocket access token saved successfully."
         );
     }
