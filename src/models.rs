@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct AuthenticateUserRequest {
     pub redirect_uri: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct AccessTokenRequest {
     pub request_token: String,
 }

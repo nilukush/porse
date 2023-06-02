@@ -20,8 +20,9 @@ mod tests {
         let pocket_sdk = PocketSdk::new("80908-b39061ed0999bb292f0fe716".to_string());
         let mut app = test::init_service(
             App::new()
+                .wrap(actix_web::middleware::Logger::default())
                 .app_data(web::Data::new(pocket_sdk.clone()))
-                .route("/authenticate", web::post().to(authenticate_user)),
+                .configure(configure_routes),
         )
         .await;
 
@@ -51,9 +52,9 @@ mod tests {
         let pocket_sdk = PocketSdk::new("80908-b39061ed0999bb292f0fe716".to_string());
         let mut app = test::init_service(
             App::new()
+                .wrap(actix_web::middleware::Logger::default())
                 .app_data(web::Data::new(pocket_sdk.clone()))
-                .route("/authenticate", web::post().to(authenticate_user))
-                .route("/save-access-token", web::post().to(save_access_token)),
+                .configure(configure_routes),
         )
         .await;
 

@@ -12,13 +12,21 @@ pub async fn authenticate_user(
     pocket_sdk: web::Data<PocketSdk>,
     form: web::Json<AuthenticateUserRequest>,
 ) -> impl Responder {
+    // Log the incoming request
+    let form_json = serde_json::to_string(&form);
+    if let Ok(json) = form_json {
+        log::info!("Received request: {}", json);
+    } else {
+        log::error!("Failed to serialize the request form to JSON");
+    }
+
     let redirect_uri = &form.redirect_uri;
 
     // Perform authentication logic using the Pocket SDK
     let request_token = match pocket_sdk.obtain_request_token(redirect_uri).await {
         Ok(token) => token,
         Err(err) => {
-            eprintln!("Error obtaining request token: {}", err);
+            log::error!("Error obtaining request token: {}", err);
             return HttpResponse::InternalServerError().finish();
         }
     };
@@ -27,6 +35,14 @@ pub async fn authenticate_user(
         "success": true,
         "request_token": request_token,
     });
+
+    // Log the response
+    let response_json = serde_json::to_string(&response_body);
+    if let Ok(json) = response_json {
+        log::info!("Sending response: {}", json);
+    } else {
+        log::error!("Failed to serialize the response body to JSON");
+    }
 
     HttpResponse::Ok()
         .content_type("application/json")
@@ -38,6 +54,14 @@ pub async fn save_access_token(
     pocket_sdk: web::Data<PocketSdk>,
     redis_client: web::Data<Client>,
 ) -> impl Responder {
+    // Log the incoming request
+    let form_json = serde_json::to_string(&form);
+    if let Ok(json) = form_json {
+        log::info!("Received request: {}", json);
+    } else {
+        log::error!("Failed to serialize the request form to JSON");
+    }
+
     let request_token = &form.request_token;
 
     // Convert the request token to Pocket access token using the Pocket SDK
@@ -66,12 +90,20 @@ pub async fn save_access_token(
             };
 
         if let Err(error) = redis_result {
-            println!("Failed to store access token in Redis: {}", error);
+            log::error!("Failed to store access token in Redis: {}", error);
             return HttpResponse::InternalServerError().json(json!({
                 "success": false,
                 "error": "Failed to store access token in Redis",
                 "access_token_response": access_token_response,
             }));
+        }
+
+        // Log the response
+        let response_json = serde_json::to_string(&access_token_response);
+        if let Ok(json) = response_json {
+            log::info!("Sending response: {}", json);
+        } else {
+            log::error!("Failed to serialize the access token response to JSON");
         }
 
         HttpResponse::Ok().json(json!({
@@ -80,11 +112,16 @@ pub async fn save_access_token(
             "access_token_response": access_token_response,
         }))
     } else {
-        println!("Access Token Conversion Failed: {:?}", access_token_result);
+        log::error!("Access Token Conversion Failed: {:?}", access_token_result);
         HttpResponse::InternalServerError().json(json!({
             "success": false,
             "error": "Access Token Conversion Failed",
             "access_token_response": access_token_result,
         }))
     }
+}
+
+pub fn configure_routes(cfg: &mut web::ServiceConfig) {
+    cfg.route("/authenticate", web::post().to(authenticate_user))
+        .route("/save-access-token", web::post().to(save_access_token));
 }

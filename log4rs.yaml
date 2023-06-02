@@ -1,0 +1,12 @@
+# log4rs.yaml
+refresh_rate: 30 seconds
+appenders:
+  file:
+    kind: file
+    path: logs/porse.log
+    encoder:
+      pattern: "{d} [{l}] - {m}{n}"
+root:
+  level: debug
+  appenders:
+    - file

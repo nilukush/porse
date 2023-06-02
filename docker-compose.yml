@@ -1,0 +1,28 @@
+version: '3'
+services:
+  porse:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - 8080:8080
+    env_file:
+      - .env
+    depends_on:
+      - redis
+    logging:
+      # for container logging
+      driver: "json-file" # Specify the logging driver to use
+      options:
+        max-size: "10m" # Maximum size of each log file
+        max-file: "3" # Maximum number of log files to keep
+        compress: "true" # Compress the log files
+        # Add any other logging driver options as needed
+    volumes:
+      # for application logging
+      - ./logs:/app/logs
+
+  redis:
+    image: redis:latest
+    ports:
+      - 6379:6379
